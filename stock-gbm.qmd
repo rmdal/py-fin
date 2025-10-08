@@ -1,0 +1,249 @@
+---
+title: "Simulating Stock Price Path with GBM"
+subtitle: "A Comparison Between Two Approaches"
+author: "Jay / MDAL"
+---
+
+## Recap: GBM Model for Stock Prices
+The Geometric Brownian Motion (GBM) model is widely used to model stock prices. It assumes that the stock price $S_t$ follows the stochastic differential equation (SDE):
+$$
+dS_t = \mu S_t dt + \sigma S_t dW_t,
+$$ {#eq-S}
+
+or, equivalently,
+$$
+\frac{dS_t}{S_t} = \mu dt + \sigma dW_t
+$$
+where:
+
+* $\mu$ is the drift coefficient: the expected rate of return of the stock (as $dS_t / S_t$ can be viewed as the instantaneous return).
+* $\sigma$ is the volatility coefficient: the standard deviation of returns.
+* $W_t$ is a standard Brownian motion (Wiener process).
+
+Applying Itô's lemma, we can derive the process followed by the logarithm of the stock price:
+$$
+d(\ln S_t) = \left(\mu - \frac{\sigma^2}{2}\right) dt + \sigma dW_t.
+$$ {#eq-lnS}
+
+As we will see in the next sections, we can simulate stock price paths using two different approaches based on these two equations.
+
+## Approach 1: Direct Simulation of Stock Prices
+
+@eq-S can be discretized over small time intervals $\Delta t$ as:
+$$
+S_{t+\Delta t} - S_t = \mu S_t \Delta t + \sigma S_t \epsilon \sqrt{\Delta t},
+$$
+where $\epsilon \sim N(0,1)$ is a standard normal random variable. The discretization replaces the infinitesimal change $dS_t$ with a finite difference $S_{t+\Delta t} - S_t$, and $dW_t$ with $\epsilon \sqrt{\Delta t}$.
+
+Two points to note:
+
+1. The term $\epsilon \sqrt{\Delta t}$ follows from the property of Brownian motion increments, which are normally distributed with mean 0 and variance $\Delta t$. This is true even the time interval $\Delta t$ is large.
+
+2. This discretization is an *approximation* of price change over a short period of time $\Delta t$ because it assumes that $S_t$ does not change significantly over the interval $\Delta t$.[^longnote1] Therefore, the smaller the $\Delta t$, the more accurate the approximation.
+
+[^longnote1]: The SDE given by @eq-S can be viewed as an Itô process
+
+    $$
+    dx = a(x,t) dt + b(x,t) dW_t,
+    $$
+
+    where both the expected drift rate and variance of $x$ depend on the current value $x$, and change over time. Our discretization assumes that over a small time interval $\Delta t$, the coefficients $a(x,t)$ and $b(x,t)$ remain approximately constant, allowing us to use their values at the beginning of the interval. This is known as the [Euler-Maruyama method](https://en.wikipedia.org/wiki/Euler%E2%80%93Maruyama_method) for numerically solving SDEs.
+
+This discretization leads us to simulate the stock price path by iteratively applying the above equation starting from an initial price $S_0$.
+
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Set random seed for reproducibility
+np.random.seed(42)
+
+# Parameters
+S0 = 100  # Initial stock price
+mu = 0.05  # Drift coefficient
+sigma = 0.2  # Volatility coefficient
+T = 1.0  # Time horizon (1 year)
+N = 252  # Number of time steps (trading days in a year)
+dt = T / N  # Time step size
+
+# Generate all the standard normal shocks at once
+epsilon = np.random.normal(loc=0, scale=1, size=N)
+
+# Initialize the stock price array
+# We need N+1 points to include S0
+S = np.zeros(N+1)
+
+# set the initial stock price
+S[0] = S0
+
+# Simulate stock price path
+for t in range(1, N+1):
+    S[t] = S[t-1] * (1 + mu * dt + sigma * epsilon[t-1] * np.sqrt(dt))
+
+# Plot the stock price path
+fig, ax = plt.subplots()
+ax.plot(np.linspace(0, T, num=N+1), S)
+ax.set_title('Simulated Stock Price Path using Direct Simulation of Prices')
+ax.set_xlabel('Time (years)')
+ax.set_ylabel('Stock Price')
+ax.grid(axis='y', linestyle='--')
+plt.show()
+
+# Print the first and last 3 days of the simulated stock prices
+print("First 3 days:", S[:4]) # S[0] is the initial price
+print("Last 3 days:", S[-3:])
+```
+
+## Approach 2: Simulation via Log-Prices
+
+We can also simulate stock prices by first simulating the logarithm of stock prices using @eq-lnS, and then exponentiating to get the stock prices.
+
+The SDE of $\ln S_t$ given by @eq-lnS implies that for any time interval $\Delta t$,
+
+$$
+\ln S_{t+\Delta t} - \ln S_t = \left(\mu - \frac{\sigma^2}{2}\right) \Delta t + \sigma \epsilon \sqrt{\Delta t}.
+$$ {#eq-step-lnS}
+
+This result does not involve any approximation as both the drift and variance terms of the $ln S_t$ process are constant.[^longnote2]
+
+[^longnote2]: The SDE for $\ln S_t$ is a generalized Wiener process,
+
+    $$
+    dx = a\, dt + b\, dW_t,
+    $$
+
+    where both $a$ and $b$ are constants. This allows us to directly write down the distribution of increments over any time interval $\Delta t$ without approximation.
+
+We can simulate the log-price path by iteratively applying the above equation starting from an initial log-price $\ln S_0$. Once we have the log-prices, we can exponentiate them to get the stock prices.[^longnote3]
+
+[^longnote3]:
+    Since equation @eq-step-lnS holds for all $\Delta t \geq 0,$ it's tempting to simulate a stock price path with time interval $\Delta t$ by first constructing a sequence of $\{\epsilon \sqrt{\Delta t}, \epsilon \sqrt{2 \Delta t}, ...\}$, where each $\epsilon$ is *independently* drawn from $N(0, 1)$, and then using this sequence to build the log-price path. However, this approach is flawed because the increments of Brownian motion over overlapping intervals are not independent. For example, the increment $W_{2\Delta t} - W_0$ shares the same underlying Brownian motion as $W_{\Delta t} - W_0$. Therefore, we cannot simply generate independent normal variables for overlapping increments.
+
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Set random seed for reproducibility
+np.random.seed(42)
+
+# Parameters
+S0 = 100  # Initial stock price
+mu = 0.05  # Drift coefficient
+sigma = 0.2  # Volatility coefficient
+T = 1.0  # Time horizon (1 year)
+N = 252  # Number of time steps (trading days in a year)
+dt = T / N  # Time step size
+
+# Generate all the standard normal shocks at once
+epsilon = np.random.normal(loc=0, scale=1, size=N)
+
+# Initialize the stock price and log stock price arrays
+# We need N+1 points to include S0
+S = np.zeros(N+1)
+log_S = np.zeros(N+1)
+
+# Set the initial log stock price
+log_S[0] = np.log(S0)
+
+# Simulate stock price path
+for t in range(1, N+1):
+    log_S[t] = log_S[t-1] + (mu - 0.5 * sigma**2) * dt + sigma * epsilon[t-1] * np.sqrt(dt)
+
+# Exponentiate to get stock prices
+S = np.exp(log_S)
+
+# Plot the stock price path
+fig, ax = plt.subplots()
+ax.plot(np.linspace(0, T, num=N+1), S)
+ax.set_title('Simulated Stock Price Path using Log-Price Simulation')
+ax.set_xlabel('Time (years)')
+ax.set_ylabel('Stock Price')
+ax.grid(axis='y', linestyle='--')
+plt.show()
+
+# Print the first and last 3 days of the simulated stock prices
+print("First 3 days:", S[:4]) # S[0] is the initial price
+print("Last 3 days:", S[-3:])
+```
+
+Note that the stock price paths generated by both approaches are almost identical, as they are based on the same underlying GBM model and we have set the random seed for reproducibility. However, the log-price simulation is generally more accurate and stable, especially for larger time steps, because it avoids the approximation error inherent in the direct price simulation.
+
+## A More Efficient Implementation
+
+Taking the simulation via log-price approach, we can improve its efficiency by taking advantage of vectorized operations in NumPy. Instead of simulating each time step in a loop, we can calculate all time steps at once.
+
+To do so, we first generate the Brownian motion path by cumulatively summing the scaled normal shocks (`np.cumsum()`). We then compute the log-prices using vectorized operations, and finally exponentiate to get the stock prices.
+
+Let's write a function that implements this more efficient approach. In addition to the parameters used in the previous examples, the function takes another parameter specifying the number of paths to simulate. (We also include an optional random seed parameter for reproducibility.)
+
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+
+def simulate_gbm_path(S0, mu, sigma, T, N, num_path, seed=None):
+
+    if seed is not None:
+        np.random.seed(seed)
+    
+    dt = T / N # Time step size
+    t = np.linspace(0, T, N+1) # Time grid; N+1 points to include t=0
+
+    # Generate all the standard normal shocks at once for all paths
+    eps = np.random.normal(size=(num_path, N))
+    
+    # Generate the Brownian motion paths; add W(0) = 0
+    W = np.cumsum(np.sqrt(dt) * eps, axis=1)
+    W = np.concatenate((np.zeros((num_path, 1)), W), axis=1)
+
+    # Calculate log-prices using vectorized operations
+    log_S = np.log(S0) + (mu - 0.5 * sigma**2) * t + sigma * W
+
+    # Exponentiate to get stock prices
+    return np.exp(log_S)
+```
+
+1. `np.sqrt(dt) * epsilon` is an array of size `(num_path, N)`. `np.cumsum(, axis=1)` cumulatively sum over all columns (`axis=1`) for each row of paths. This gives us the Brownian motion paths. (See [here](https://numpy.org/doc/stable/reference/generated/numpy.cumsum.html) for more on `np.cumsum()`.)
+
+2. concatenates a column of zeros at the beginning of the Brownian motion paths to represent $W(0) = 0$ for all paths. (See [here](https://numpy.org/doc/stable/reference/generated/numpy.concatenate.html) for more on `np.concatenate()`.)
+
+Now, let's use this function to simulate and plot multiple stock price paths.
+
+```{python}
+# Parameters
+S0 = 100  # Initial stock price
+mu = 0.05  # Drift coefficient
+sigma = 0.2  # Volatility coefficient
+T = 1.0  # Time horizon (1 year)
+N = 252  # Number of time steps (trading days in a year)
+num_path = 3  # Number of paths to simulate
+
+# Simulate stock price paths
+S = simulate_gbm_path(S0, mu, sigma, T, N, num_path, seed=42)
+
+# Plot the stock price path
+fig, ax = plt.subplots()
+
+# Plot each row as a separate line
+t = np.linspace(0, T, num=N+1)
+for i in range(num_path):
+    ax.plot(t, S[i], label=f'Path {i+1}')
+
+ax.set_title('Simulated Stock Price Path using Log-Price Simulation')
+ax.set_xlabel('Time (years)')
+ax.set_ylabel('Stock Price')
+ax.grid(axis='y', linestyle='--')
+plt.legend()
+plt.show()
+
+# Print the first and last 3 days of the simulated stock prices for the first path
+print("First 3 days of Path 1:", S[0, :4]) # S[0,0] is the initial price
+print("Last 3 days of Path 1:", S[0, -3:])
+```
+
+Note that the output for stock price path 1 is identical to those generated by the previous log-price simulation approach as both simulations are based on the exact same algorithm and we have set the random seed for reproducibility.
+
+This implementation is more efficient because it leverages NumPy's ability to perform operations on entire arrays at once, rather than iterating through each time step and path individually. This can lead to significant performance improvements, especially when simulating a large number of paths or time steps.
+
+## References
+
+[Hull, J. C. (2021). *Options, Futures, and Other Derivatives* (11th ed.). Pearson.](https://www.pearson.com/en-ca/subject-catalog/p/options-futures-and-other-derivatives/P200000005938/9780136939917)

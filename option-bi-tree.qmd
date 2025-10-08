@@ -1,0 +1,410 @@
+---
+title: "Pricing Options Using Binomial Trees"
+author: "Jay / MDAL"
+bibliography: references.bib
+---
+
+## Introduction
+
+This tutorial demonstrates how to price European and American options using a binomial tree model in Python. The binomial tree model is a popular method for option pricing due to its simplicity and flexibility.
+
+
+##  Recap: Binomial Tree Model
+
+The binomial tree model is a discrete-time model for the evolution of an asset's price. It assumes that, over each small time step, the asset price can move to one of two possible values: an "up" value or a "down" value. The model is built on the following parameters:
+
+* Current stock price: $S_0$
+* Strike price of the option: $K$
+* Time to maturity (in years): $T$
+* Risk-free interest rate (annualized): $r$
+* Volatility of the underlying asset (annualized): $\sigma$
+* Number of time steps in the binomial tree: $N$
+
+From these parameters, we can calculate the parameters needed for the binomial tree:
+
+* Length of each time step: $\Delta t = \frac{T}{N}$
+* Up factor: $u = e^{\sigma \sqrt{\Delta t}}$
+* Down factor: $d = 1/u$
+* Risk-neutral probability of an up move: $p = \frac{e^{r \Delta t} - d}{u - d}$
+
+Asset prices at each node of the tree can be calculated as follows:
+
+$$S_{j,i} = S_0 \cdot u^{i-j} \cdot d^{j},$$
+
+where $i={0,1,2,...,N}$ is the time step and $j={0,1,2,...,i}$ is the number of down moves.[^1]
+
+[^1]: The notation and formula are chosen such that it matches the code implementation later.
+
+The value of options can be calculated using backward induction, starting from the terminal nodes (maturity) and working backward to the root node (current time).
+
+The value of the option at end of the tree is determined by its payoff at maturity. For a call option, the payoff is given by (denote $f_{j, i}$ as the option value at node $j$ at time step $i$):
+
+$$f_{j, N} = \max(0, S_{j, N} - K)$$
+
+For a put option, the payoff is given by:
+
+$$f_{j, N} = \max(0, K - S_{j, N})$$
+
+The option value at each preceding node is calculated as the discounted expected value of the option at the next time step:
+
+$$f_{j, i} = e^{-r \Delta t} [p \cdot f_{j, i+1} + (1 - p) \cdot f_{j+1, i+1}]$$
+
+For American options, we also need to consider the possibility of early exercise at each node:
+
+$$f_{j, i} = \max(f_{j, i}, S_{j, i} - K)$$
+
+For a detailed explanation of the binomial tree model, please refer to @hull2021options (chapter 13 and 21).
+
+## Basic Algorithm
+
+Implementing the binomial tree model involves the following steps:
+
+1. Parameters: Define the parameters for the option and the underlying asset. Calculate the binomial tree parameters.
+
+2. Tree Construction: Construct a binomial tree to store the possible future prices of the option and the underlying asset at each time step. In our implementation, we use 2D arrays to represent the binomial tree. Therefore, effectively, only the upper triangles of the arrays are used.[^longnote2] We construct three 2D arrays: one for asset prices, one for option values, and one to track whether the option is exercised at each node.[^3]
+
+[^longnote2]: For example, for a tree with $N=2$, we create a 2D array with 3 rows and 3 columns to store option values. However, we really just need the upper triangle (including the diagonal) of the array to store the option values for all nodes:
+    
+
+    Matrix representation:
+    $$
+    \begin{bmatrix}
+    f_{0,0} & f_{0,1} & f_{0,2} \\
+    0 & f_{1,1} & f_{1,2} \\
+    0 & 0 & f_{2,2}
+    \end{bmatrix}
+    $$
+
+[^3]: We use 2D arrays mainly for clarity and visualization purpose. In practice, if intermediate results are not needed, we can optimize the memory usage by using 1D arrays, as shown later.
+
+3. Asset Price Calculation: Calculate the asset prices at each node of the tree using the up and down factors.
+
+4. Option Valuation: Calculate the option value at each node of the tree, starting from the terminal nodes (maturity) and working backward to the root node (current time). For European options, the option can only be exercised at maturity, while for American options, it can be exercised at any time before or at maturity.
+
+
+## Pricing a European Call Option
+
+We start by pricing a European call option using a binomial tree with 2 time steps.
+
+```{python}
+import numpy as np
+
+# Parameters
+S0 = 100  # Initial stock price
+K = 100   # Strike price
+T = 1     # Time to maturity in years
+r = 0.05  # Risk-free interest rate
+sigma = 0.2  # Volatility
+N = 2     # Number of time steps
+
+# Calculate parameters for the binomial tree
+dt = T / N  # Time step size
+u = np.exp(sigma * np.sqrt(dt))  # Up factor
+d = 1 / u  # Down factor
+p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+# Initialize three 2D arrays to represent the binomial tree
+# One for asset prices, one for option values, and one to track exercises
+asset_prices = np.zeros((N + 1, N + 1))
+option_values = np.zeros((N + 1, N + 1))
+exercises = np.zeros((N + 1, N + 1), dtype=bool)
+
+# Set asset prices at each node
+for i in range(N + 1):
+    for j in range(i + 1):
+        asset_prices[j, i] = S0 * (u ** (i - j)) * (d ** j)
+
+# Set option values at maturity
+option_values[:, N] = np.maximum(0, asset_prices[:, N] - K)
+
+# Set exercise values at maturity
+exercises[:, N] = (asset_prices[:, N] - K) > 0
+
+# Backward induction to calculate option price at earlier nodes
+for i in range(N - 1, -1, -1):
+    # Time step i
+
+    for j in range(i + 1):
+        # Update option values
+        option_values[j, i] = np.exp(-r * dt) * (p * option_values[j, i + 1] + (1 - p) * option_values[j + 1, i + 1])
+
+# Display parameters and option price
+print("Strike Price:", K)
+print(f"Time to Maturity (T): {T} year(s)")
+print(f"Time Step (dt): {dt:.4f} year(s)")
+print(f"Discount Factor per Step: {np.exp(-r * dt):.4f}")
+print(f"Risk-neutral Probability (p): {p:.4f}")
+print(f"Up Factor (u): {u:.4f}")
+print(f"Down Factor (d): {d:.4f}")
+print()
+print(f"Option Price: {option_values[0, 0]:.4f}")
+```
+
+We can visualize the binomial tree structure and the option values at each node.
+```{python}
+#| code-fold: true
+#| code-summary: "Define a function to plot the binomial tree (click to expand)"
+
+# Plotting the Binomial Tree
+import matplotlib.pyplot as plt
+
+def plot_binomial_tree(asset_prices, option_values, exercises, N):
+    fig, ax = plt.subplots()
+    for i in range(N + 1):
+        for j in range(i + 1):
+            x = i  # Set x-coordinate based on time step
+            y = i - 2 * j  # Adjust y-coordinate for symmetry
+            
+            # Plot the node
+            if exercises[j, i]:
+                fcolor = 'lemonchiffon'  # Color for exercised nodes
+            else:
+                fcolor = 'white'  # Color for non-exercised nodes
+            
+            ax.text(x, y, 
+                f"S: {asset_prices[j, i]:.2f}\nf: {option_values[j, i]:.2f}", 
+                ha='center', va='center', 
+                bbox=dict(facecolor=fcolor, edgecolor='black'))
+            
+            # Draw branches
+            if i < N:
+                ax.plot([x, x + 1], [y, y - 1], 'k-')  # Downward branch
+                ax.plot([x, x + 1], [y, y + 1], 'k-')  # Upward branch
+  
+    # Set limits and labels
+    ax.set_xlim(0, N)
+    ax.set_ylim(-N - 1, N + 1)
+    ax.set_xlabel('Time Steps')
+
+    # Set x-ticks (start from 0 and increment by 1)
+    ax.set_xticks(range(N + 1))
+    
+    # Remove unnecessary spines and ticks
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.yaxis.set_visible(False)
+
+    ax.set_title('Binomial Tree for Option Pricing')
+
+    plt.show()
+```
+
+```{python}
+# Plot the tree
+plot_binomial_tree(asset_prices, option_values, exercises, N)
+```
+
+
+## Pricing a American Put Option
+
+The process for pricing an American put option is similar, but we need to account for the possibility of early exercise at each node. (Three code changes are marked in the comments.)
+
+```{python}
+import numpy as np
+
+# Parameters
+S0 = 100  # Initial stock price
+K = 100   # Strike price
+T = 1     # Time to maturity in years
+r = 0.05  # Risk-free interest rate
+sigma = 0.2  # Volatility
+N = 4     # Number of time steps
+
+# Calculate parameters for the binomial tree
+dt = T / N  # Time step size
+u = np.exp(sigma * np.sqrt(dt))  # Up factor
+d = 1 / u  # Down factor
+p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+# Initialize three 2D arrays to represent the binomial tree
+# One for asset prices, one for option values, and one to track exercises
+asset_prices = np.zeros((N + 1, N + 1))
+option_values = np.zeros((N + 1, N + 1))
+exercises = np.zeros((N + 1, N + 1), dtype=bool)
+
+# Set asset prices at each node
+for i in range(N + 1):
+    for j in range(i + 1):
+        asset_prices[j, i] = S0 * (u ** (i - j)) * (d ** j)
+
+# Set option values at maturity (Change 1)
+option_values[:, N] = np.maximum(0, K - asset_prices[:, N])
+
+# Set exercise values at maturity (Change 2)
+exercises[:, N] = (K - asset_prices[:, N]) > 0
+
+# Backward induction to calculate option price at earlier nodes
+for i in range(N - 1, -1, -1):
+    # Time step i
+
+    for j in range(i + 1):
+        # Update option values
+        option_values[j, i] = np.exp(-r * dt) * (p * option_values[j, i + 1] + (1 - p) * option_values[j + 1, i + 1])
+
+        # Check for early exercise and update option values accordingly (Change 3)
+        exercises[j, i] = (K - asset_prices[j, i]) > option_values[j, i]
+        option_values[j, i] = np.maximum(option_values[j, i], K - asset_prices[j, i])
+
+# Display parameters and option price
+print("Strike Price:", K)
+print(f"Time to Maturity (T): {T} year(s)")
+print(f"Time Step (dt): {dt:.4f} year(s)")
+print(f"Discount Factor per Step: {np.exp(-r * dt):.4f}")
+print(f"Risk-neutral Probability (p): {p:.4f}")
+print(f"Up Factor (u): {u:.4f}")
+print(f"Down Factor (d): {d:.4f}")
+print()
+print(f"Option Price: {option_values[0, 0]:.4f}")
+
+```
+
+
+```{python}
+# Plot the tree
+plot_binomial_tree(asset_prices, option_values, exercises, N)
+```
+
+## Putting It All Together with Efficiency Improvements
+
+We can encapsulate the binomial tree option pricing logic into a single function that can handle both European and American options, as well as call and put options.
+
+In this implementation, we are not interested in storing the entire binomial tree structure for visualization purposes. On the other hand, we focus on optimizing the efficiency of the algorithm. 
+
+* Since during the backward induction process, we only need the current and next time step values, we can reduce the memory usage by using 1D arrays instead of 2D arrays. 
+
+* At each time step, instead of looping through all nodes, we can use Numpy's vectorized operations and array slicing to update only the relevant parts of the 1D arrays. NumPy's internal optimizations make these operations faster than explicit Python loops.
+
+These optimizations will be particularly useful when dealing with a large number of time steps.
+
+```{python}
+import numpy as np
+
+def binomial_tree(S0, K, T, r, sigma, N, call=True, american=False):
+    # Calculate parameters
+    dt = T / N
+    u = np.exp(sigma * np.sqrt(dt))
+    d = 1 / u
+    p = (np.exp(r * dt) - d) / (u - d)
+
+    # Initialize two 1D arrays to keep track of asset prices and option values
+    # These arrays will be updated in place during the backward induction at each time step
+    # Only the necessary parts of the arrays will be used when updating
+    S = np.zeros(N + 1)
+    f = np.zeros(N + 1)
+
+    # Set asset prices at maturity
+    # Note: since d = 1 / u, the calculation can be simplified
+    S = S0 * u ** np.arange(N, -N - 2, -2)
+
+    # Set option values at maturity
+    if call:
+        f = np.maximum(0, S - K)
+    else:
+        f = np.maximum(0, K - S)
+
+    # Backward induction to calculate option price at earlier nodes
+    for i in range(N - 1, -1, -1):
+        # Time step i
+        
+        # Only the first i+1 elements need to be updated at this step
+        last_idx = i + 1
+
+        # Update option values
+        f[:last_idx] = np.exp(-r * dt) * (p * f[:last_idx] + (1 - p) * f[1:last_idx + 1])
+        
+        # For American options, check for early exercise
+        if american:
+            # Update asset prices
+            S[:last_idx] = S0 * u ** np.arange(i, -i - 2, -2)
+            
+            # Check for early exercise and update option values accordingly
+            if call:
+                f[:last_idx] = np.maximum(f[:last_idx], S[:last_idx] - K)
+            else:
+                f[:last_idx] = np.maximum(f[:last_idx], K - S[:last_idx])
+
+    return f[0]
+```
+
+Let's apply this function using the same parameters as before.
+```{python}
+# European Call Option
+S0 = 100  # Initial stock price
+K = 100   # Strike price
+T = 1     # Time to maturity in years
+r = 0.05  # Risk-free interest rate
+sigma = 0.2  # Volatility
+N = 2     # Number of time steps
+call = True  # True for Call option, False for Put option
+american = False  # True for American option, False for European
+
+# Calculate option price
+option_price = binomial_tree(S0, K, T, r, sigma, N, call, american)
+print(f"Option Price: {option_price:.4f}")
+```
+
+```{python}
+# American Put Option
+S0 = 100  # Initial stock price
+K = 100   # Strike price
+T = 1     # Time to maturity in years
+r = 0.05  # Risk-free interest rate
+sigma = 0.2  # Volatility
+N = 4     # Number of time steps
+call = False  # True for Call option, False for Put option
+american = True  # True for American option, False for European
+
+# Calculate option price
+option_price = binomial_tree(S0, K, T, r, sigma, N, call, american)
+print(f"Option Price: {option_price:.4f}")
+```
+
+Note that the results match those obtained from the previous implementations.
+
+Finally, let's use a larger number of time steps to get more accurate results.
+
+```{python}
+# European Call Option
+S0 = 100  # Initial stock price
+K = 100   # Strike price
+T = 1     # Time to maturity in years
+r = 0.05  # Risk-free interest rate
+sigma = 0.2  # Volatility
+N = 15000    # Number of time steps
+call = True  # True for Call option, False for Put option
+american = False  # True for American option, False for European
+
+# Calculate option price
+ec_price = binomial_tree(S0, K, T, r, sigma, N, call, american)
+print(f"European Call Option Price: {ec_price:.4f}")
+
+# American Put Option
+call = False  # True for Call option, False for Put option
+american = True  # True for American option, False for European
+
+# Calculate option price
+ap_price = binomial_tree(S0, K, T, r, sigma, N, call, american)
+print(f"American Put Option Price: {ap_price:.4f}")
+```
+
+Since Black-Scholes formula can be used for pricing European options, we can compare the European call option price with the Black-Scholes price.
+
+```{python}
+from scipy.stats import norm
+
+def black_scholes_european_call(S0, K, T, r, sigma):
+    d1 = (np.log(S0 / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    return S0 * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+
+# Calculate Black-Scholes price for European call option
+bs_price = black_scholes_european_call(S0, K, T, r, sigma)
+print(f"Black-Scholes European Call Option Price: {bs_price:.4f}")
+```
+
+We see the European call option price from the binomial tree model is very close to the Black-Scholes price.
+
+## References
+
+[Hull, J. C. (2021). *Options, Futures, and Other Derivatives* (11th ed.). Pearson.](https://www.pearson.com/en-ca/subject-catalog/p/options-futures-and-other-derivatives/P200000005938/9780136939917)

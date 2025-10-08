@@ -1,0 +1,597 @@
+---
+title: "Delta Hedging a European Call Option"
+author: "Jay / MDAL"
+bibliography: references.bib
+---
+
+## Introduction
+Delta hedging is a fundamental strategy in options trading that aims to reduce the directional risk associated with price fluctuations in the underlying asset. By dynamically adjusting their holdings in the underlying asset, traders can maintain a delta-neutral portfolio, thereby mitigating potential losses from price movements.
+
+In this tutorial, we demonstrate how to implement a delta hedging strategy for a European call option using Python. We simulate the underlying stock price using Geometric Brownian Motion (GBM), compute the option’s delta via the Black–Scholes model, and periodically adjust the hedge at a specified rebalancing frequency.
+
+## Recap of Key Concepts
+
+Before we get into the implementation, let's briefly revisit some key concepts behind delta hedging.
+
+### Delta and BS Delta
+
+The *Delta ($\Delta$)* of an option measures the sensitivity of an option's price to changes in the price of the underlying asset. For a call option, delta ranges from 0 to 1, indicating how much the option price is expected to change for a small change in the underlying asset's price. For example, a delta of 0.6 means that for a small increase in the underlying asset's price, the option price is expected to increase by approximately 60% of that change.
+
+The *Black-Scholes model* is a mathematical model used to price European options and calculate their Greeks, including delta. Under the Black-Scholes framework, the price of a European call option (on a non-dividend-paying stock) with stock price $S$, strike price $K$, time to expiration $T$, risk-free interest rate $r$, and volatility $\sigma$ is given by:
+
+$$C(S, K, T, r, \sigma) = S N(d_1) - K e^{-rT} N(d_2),$$
+
+where
+$$d_1 = \frac{\ln(S / K) + (r + \sigma^2 / 2) T}{\sigma \sqrt{T}},$$
+$$d_2 = d_1 - \sigma \sqrt{T},$$
+and $N(\cdot)$ is the cumulative distribution function of the standard normal distribution.
+
+The *Black-Scholes delta (BS delta)* of a European call option can be calculated as follows:
+
+$$\Delta(\text{Call}) = \frac{\partial C}{\partial S} = N(d_1)$$
+
+Note that at expiration ($T=0$), the delta of a call option is $1$ if the option is in-the-money ($S > K$) and $0$ if it is out-of-the-money ($S \leq K$).
+
+### Delta Hedging
+The *Delta hedging* strategy involves taking a position in the underlying asset that offsets the delta of the option position.
+
+For example, if you sold a call option on $100$ shares of a stock and the option's BS delta is $0.6$, you would buy $0.6 \times 100 = 60$ shares of the stock to hedge your position. This hedge operation is known as delta neutralization. A short position in a call option with 100 shares means the total delta on the option is $0.6 \times (-100) = -600.$ The delta of one share of a stock is $1$, so by buying $600$ shares of the stock, you neutralize the delta of the option position. Since delta changes as the underlying asset price changes, to keep a delta neutral position, the hedge must be adjusted continuously.
+
+Formally, to hedge a short position in a call option (with a standard contract size of 100 shares of the underlying stock), you hold $100\Delta$ units of the underlying stock.^[Conversely, to hedge a long position in a call option, you hold $-100\Delta$ units of the underlying stock.] Therefore, the value of your *hedging portfolio* at time $t$ is:
+
+$$
+V_t^{\text{hedge}} = 100 \Delta_t S_t + B_t,
+$$
+
+where $100 \Delta_t S_t$ is the value of the stock position, and $B_t$ is the value of the cash or bond position. A negative $B_t$ indicates a borrowing position.
+
+Define 
+
+$$
+B_0 = V_0^{\text{opt}} - 100\Delta_0 S_0,
+$$ {#eq-B_0}
+
+where $V_0^{\text{opt}}$ is the initial option value at time $0$, which is the option price calculated using the Black-Scholes formula, and $100\Delta_0 S_0$ is the cost of purchasing the initial hedge position in the underlying stock. In this setup, we assume the option is sold at time $0$ at its theoretical price, and the premium received from selling the option is included in the initial cash position $B_0$.
+
+Further, suppose that we re-balance at $\Delta t$ intervals. The cash position $B_t$ then evolves over time as follows:
+$$
+B_t = B_{t-1}e^{r\Delta t} - 100(\Delta_t - \Delta_{t-1})S_t,
+$$ {#eq-B_t}
+where $r$ is the risk-free interest rate. The first term on the right-hand side represents the growth of the cash position due to interest, while the second term represents the cost (or proceeds) from adjusting the stock position to maintain delta neutrality.
+
+If the hedge is perfect (i.e., $\Delta t \to 0$), this portfolio *replicates* the option’s price path:
+$$
+V_t^{\text{hedge}} = V_t^{\text{opt}}
+$$
+for all $t$.
+
+For discrete rebalancing, there are *replication errors*. In particular, at expiration $T$, the replication error is given by:
+$$
+\begin{align*}
+    \varepsilon_T &= V_T^{\text{hedge}} - V_T^{\text{opt}} \\
+    &= 100 \Delta_T S_T + B_T - 100\max(S_T - K, 0) \\
+    &= \begin{cases}
+            B_T + K  & \text{if } S_T > K \\
+            B_T      & \text{if } S_T \leq K
+        \end{cases}
+\end{align*}
+$$ {#eq-replication-error}
+
+Again, if the hedge is perfect, then $\varepsilon_T = 0$, but with discrete rebalancing, $\varepsilon_T$ will generally be non-zero and can be positive (a profit) or negative (a loss). The expected value of $\varepsilon_T$ is typically negative, reflecting the cost of hedging.^[If the model is mis-specified (e.g., the true volatility is lower than the assumed volatility), the expected replication error can be positive.]
+
+One commonly used metric to measure hedging performance is the ratio of the standard deviation of the replication error $\varepsilon_T$ (discounted to $t=0$) to the option's theoretical price $V_0^{\text{opt}}$. Define $\tilde{\varepsilon}_T := e^{-rT} \varepsilon_T.$ The hedging performance is then given by:
+$$
+\frac{\text{sd}(\tilde{\varepsilon}_T)}{V_0^{\text{opt}}}
+$$    
+
+This measure scales the disperse of replication error by the option price, providing a normalized measure of hedging effectiveness. It allows meaningful comparison of hedge performance across options with different strikes, maturities, volatilities, or underlyings with different price levels.^[Note that to measure hedging performance, we care about the dispersion of the replication error, not its expected value. The dispersion captures how much residual risk (unhedged randomness) remains after hedging. On the other hand, the expected value of the replication error captures systematic bias of hedging (i.e., on average over/under hedging).]
+
+### An Alternative Formulation
+The above formulation of delta hedging start by setting up a hedging portfolio that replicates the option's price at $t=0$. That is, the initial cash position $B_0$ includes the premium received from selling the option (see @eq-B_0) so that the total value of the hedging portfolio equals the option price at $t=0$. 
+
+An alternative approach is to start with
+$$
+B_0 = - 100\Delta_0 S_0
+$$
+
+The initial value of the hedging portfolio is now zero, i.e., $V_0^{\text{hedge}} = 0.$
+
+The evolution of $B_t$ is still given by @eq-B_t. The negative of the cash position (i.e., $-B_t$) now represents the cumulative cost of hedging up to time $t$ (excluding the initial option premium received).
+
+If the hedging is perfect, $V_t^{\text{hedge}} = 0$ for all $t$, but this is of course not possible with discrete rebalancing.
+
+At expiration, the replication error at expiration is again given by @eq-replication-error. However, the interpretation of the replication error is now different. The replication error ($-\varepsilon_T$, to be more precise) now captures the total cost of hedging, excluding the initial option premium received.
+
+Under perfect hedging, the replication error (again $-\varepsilon_T$ to be precise) is equal to the option payoff (i.e., the total cost of hedging equals the option payoff). This also means that the expected value of the replication error ($-E[\varepsilon_T]$) discounted to $t=0$ is equal to the theoretical price of the option.
+
+With discrete rebalancing, the replication error ($-\varepsilon_T$) will generally be different from the option payoff. The expected value of the replication error ($-E[\varepsilon_T]$) discounted to $t=0$ is typically more than the theoretical price of the option, reflecting the cost of hedging.
+
+## Scenario Setup
+
+We use the same setup as in @hull2021options (chapter 19) to illustrate the delta hedging strategy. We assume a financial institution has sold a European call option on $100,000$ shares of a non-dividend-paying stock and wants to hedge its position using delta hedging. The institution will adjust its hedge position weekly over a 20-week period until the option expires.
+
+We will consider the following parameters for our simulation:
+
+* Initial stock price: $S_0 = 49$
+* Strike price: $K = 50$
+* Time to expiration: $T = 0.3846$ years (20 weeks)
+* Risk-free interest rate: $r = 5\%$
+* Volatility (per annum): $\sigma = 20\%$
+
+We also assume the option is sold at its theoretical price although this is not essential for our implementation and analysis.
+
+## A Step-by-Step Implementation
+
+In this implementation, we simulate a single stock price path using Geometric Brownian Motion (GBM) and perform delta hedging step by step within a `for` loop.^[Later, when we investigate the relationship between hedging performance and rebalancing frequencies, we will eliminate the `for` loop and re-implement delta hedging with vectorized code to improve efficiency.] At each iteration, we record all relevant results to prepare for a tabular presentation. To maintain readability and ensure numerical consistency in the table, we round the values to appropriate decimal places.
+
+We apply the alternative formulation discussed earlier to track the delta hedging process, i.e., setting $B_0 = - 100\Delta_0 S_0$. This approach ensures consistency with the table presentation in @hull2021options (Chapter 19). With this formulation, the cumulative hedging cost is $-B_t$, the negative of the cash position. The final hedging cost, excluding the initial option premium received, is given by $- \varepsilon_T$, the negative of the replication error.
+
+We start by implementing the stock price simulation function `simulate_gbm_path()`. This implementation is explained in details in the [GBM simulation tutorial](stock-gbm.qmd).
+```{python}
+#| code-fold: true
+#| code-summary: "Stock Price Simulation with GBM (click to expand)"
+import numpy as np
+
+# --- GBM simulation ---
+def simulate_gbm_path(S0, mu, sigma, T, N, num_path, seed=None):
+
+    if seed is not None:
+        np.random.seed(seed)
+    
+    dt = T / N # Time step size
+    t = np.linspace(0, T, N+1) # Time grid; N+1 points to include t=0
+
+    # Generate all the standard normal shocks at once for all paths
+    eps = np.random.normal(size=(num_path, N))
+    
+    # Generate the Brownian motion paths; add W(0) = 0
+    W = np.cumsum(np.sqrt(dt) * eps, axis=1)
+    W = np.concatenate((np.zeros((num_path, 1)), W), axis=1)
+
+    # Calculate log-prices using vectorized operations
+    log_S = np.log(S0) + (mu - 0.5 * sigma**2) * t + sigma * W
+
+    # Exponentiate to get stock prices
+    return np.exp(log_S)
+```
+
+Next we define a function to calculate the Black-Scholes delta.
+
+```{python}
+import numpy as np
+from scipy.stats import norm
+
+# --- Black-Scholes delta ---
+def calculate_bs_delta(S, K, T, r, sigma):
+    
+    # At expiration, delta is 1 if in-the-money, else 0
+    # Check this before d1 calculation to avoid division by zero
+    if T <= 0:
+        return 1.0 if S > K else 0.0
+
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+
+    return norm.cdf(d1)
+```
+
+We now implement the delta hedging logic step by step.
+
+```{python}
+# --- Delta Hedging Implementation ---
+# Parameters
+S0 = 49          # Initial stock price
+K = 50           # Strike price
+T = 20 / 52      # Time to expiration in years (20 weeks)
+r = 0.05         # Risk-free interest rate
+sigma = 0.2      # Volatility (20% per annum)
+
+contract_size = 100000  # Number of shares per option contract
+
+# Simulation parameters
+N = 20           # Number of time steps (weekly rebalancing)
+num_path = 1     # Number of simulated paths
+
+# Simulate stock price path
+S = simulate_gbm_path(S0, r, sigma, T, N, num_path, seed=37)
+S = S[0].round(2)  # Use the first (and only) path and round to 2 decimal places
+
+# Initialize arrays for delta hedging
+delta = np.zeros(N + 1)
+share_purchased = np.zeros(N + 1)
+share_in_hand = np.zeros(N + 1)
+cost_of_share_purchased = np.zeros(N + 1)
+cost_of_interest = np.zeros(N + 1)
+cumulative_cost = np.zeros(N + 1)
+
+# Time to expiration at each step
+T_t = np.linspace(T, 0, N + 1)
+
+# Time step size
+dt = T / N
+
+# Initial hedge setup at t=0
+delta[0] = round(calculate_bs_delta(S[0], K, T, r, sigma), 3)
+share_purchased[0] = delta[0] * contract_size
+share_in_hand[0] = share_purchased[0]
+cost_of_share_purchased[0] = round(share_purchased[0] * S[0] / 1000, 1)
+cumulative_cost[0] = cost_of_share_purchased[0]
+cost_of_interest[0] = round(cumulative_cost[0] * (np.exp(r * dt) - 1), 1)
+
+# Delta hedging over time
+for i in range(1, N + 1):
+    delta[i] = round(calculate_bs_delta(S[i], K, T_t[i], r, sigma), 3)
+    delta_change = delta[i] - delta[i - 1]
+    share_purchased[i] = delta_change * contract_size
+    share_in_hand[i] = share_in_hand[i-1] + share_purchased[i]
+    cost_of_share_purchased[i] = round(share_purchased[i] * S[i] / 1000, 1)
+    cumulative_cost[i] = cumulative_cost[i-1] + cost_of_share_purchased[i] + cost_of_interest[i-1]
+    cost_of_interest[i] = round(cumulative_cost[i] * (np.exp(r * dt) - 1), 1)
+
+cost_of_interest[20] = np.nan  # No interest cost at maturity
+
+# Final stock price and shares held
+final_price  = S[-1]
+final_shares = share_in_hand[-1]
+
+# Option payoff at maturity
+payoff = max(final_price - K, 0) * contract_size / 1000
+
+# Stock value at maturity
+stock_value = final_price * final_shares / 1000
+
+# Value of hedging portfolio
+hedge_portfolio_value = stock_value - cumulative_cost[-1]
+
+# Final hedging cost
+hedging_cost = payoff - hedge_portfolio_value
+
+# Print results
+print(f"Final stock price: {final_price:.2f}")
+print(f"Option payoff ($000): {payoff:.2f}")
+print(f"Hedge portfolio value ($000): {hedge_portfolio_value:.2f}")
+print(f"Final hedging cost ($000): {hedging_cost:.2f}")
+```
+
+We now present the step-by-step delta hedging strategy in a well-formatted table (with the help of the Python `great_tables` library).
+```{python}
+#| code-fold: true
+#| code-summary: "Display step-by-step delta hedging (click to expand)"
+import pandas as pd
+from great_tables import GT, html
+
+# Create a DataFrame for printing results
+df = pd.DataFrame({
+    "week": np.arange(N + 1),
+    "stock_price": S,
+    "delta": delta,
+    "share_purchased": share_purchased,
+    "share_in_hand": share_in_hand,
+    "cost_of_share_purchased": cost_of_share_purchased,
+    "cumulative_cost": cumulative_cost,
+    "cost_of_interest": cost_of_interest
+})
+
+from great_tables import GT, html
+
+gt_table = (
+    GT(df)
+    .fmt_integer(columns=["share_purchased", "share_in_hand"],
+                 accounting=True)
+    .fmt_number(columns=["stock_price"], decimals=2)
+    .fmt_number(columns=["delta"], decimals=3)
+    .fmt_number(columns=["cost_of_share_purchased", "cumulative_cost", "cost_of_interest"], 
+                decimals=1,
+                accounting=True)
+    .tab_header(
+        title="Simulation of Delta Hedging",
+        subtitle="(Weekly Rebalancing for a European Call Option on 100,000 Shares)"
+    )
+    .cols_label(
+        week="Week",
+        stock_price=html("Stock <br> price"),
+        delta="Delta",
+        share_purchased=html("Shares <br> purchased"),
+        share_in_hand=html("Shares <br> in portfolio"),
+        cost_of_share_purchased=html("Cost of shares <br> purchased <br> ($000)"),
+        cumulative_cost=html("Cumulative cost <br> including interest <br> ($000)"),
+        cost_of_interest=html("Interest <br> cost <br> ($000)")
+    )
+    .cols_align(align="center")
+)
+
+gt_table.show()
+```
+
+In this simulation, the initial stock price is $\$49$, and the initial BS delta is $0.522$. Accordingly, $0.522 \times 100,000 = 52,200$ shares must be purchased to establish the initial hedge portfolio. The cost of acquiring these shares is $\$49 \times 52,200 = \$2,557.8K$. Since there is no interest cost at $t=0$, the cumulative cost at this point is also $\$2,557.8K$.
+
+At the end of week 1, the interest cost amounts to $\$2,557.8K \times (e^{0.05 \times 1/52} - 1) \approx \$2.5K$. This is added to the cumulative cost, along with the cost (or proceeds) from rebalancing the hedge. In our case, since the delta decreases from $0.522$ to $0.514$, a change of $0.008$, the portfolio sells $0.008 \times 100,000 = 800$ shares at $\$48.95$ per each to maintain neutrality, producing a cash inflow of approximately $\$39.2K$. Thus, the cumulative cost at the end of week 1 becomes $\$2,557.8K - \$39.2K + \$2.5K = \$2,521.1K$.
+
+At expiration, the option closes in-the-money, resulting in a positive option payoff. The final hedging cost of $\$221.1K$ is the cumulative rebalancing cost $\$5,221.1K$ minus the $\$5$ million received from the option holder at expiration (i.e., the $100,000$ shares at the option seller's hedging portfolio is paid at the predetermined strike price of $\$50$).
+
+Equivalently, the final hedging cost can also be computed as the negative of the replication error ($-\varepsilon_T$), which equals the difference between the option payoff and the value of the hedging portfolio at expiration. The option payoff is $(\$62.41 - \$50) \times 100,000$, corresponding to exercising the option to purchase $100,000$ shares at the strike price of $\$50$ when the stock price is $\$62.41$ at expiration. The value of the hedging portfolio equals the stock position value $\$62.41 \times 100,000$ minus the cumulative hedging cost of $\$5,221.1K$.
+
+Next, we generate a different stock price path where the option expires out of the money to examine how the delta hedging strategy performs in this scenario.^[The random seed used to generate this stock price path is 42.] Below we present the results.
+
+```{python}
+#| echo: false
+# Parameters
+S0 = 49          # Initial stock price
+K = 50           # Strike price
+T = 20 / 52      # Time to expiration in years (20 weeks)
+r = 0.05         # Risk-free interest rate
+sigma = 0.2      # Volatility (20% per annum)
+
+contract_size = 100000  # Number of shares per option contract
+
+# Simulation parameters
+N = 20           # Number of time steps (weekly rebalancing)
+num_path = 1     # Number of simulated paths
+
+# Simulate stock price path
+S = simulate_gbm_path(S0, r, sigma, T, N, num_path, seed=42)
+S = S[0].round(2)  # Use the first (and only) path and round to 2 decimal places
+
+# Initialize arrays for delta hedging
+delta = np.zeros(N + 1)
+share_purchased = np.zeros(N + 1)
+share_in_hand = np.zeros(N + 1)
+cost_of_share_purchased = np.zeros(N + 1)
+cost_of_interest = np.zeros(N + 1)
+cumulative_cost = np.zeros(N + 1)
+
+# Time to expiration at each step
+T_t = np.linspace(T, 0, N + 1)
+
+# Time step size
+dt = T / N
+
+# Initial hedge setup at t=0
+delta[0] = round(calculate_bs_delta(S[0], K, T, r, sigma), 3)
+share_purchased[0] = delta[0] * contract_size
+share_in_hand[0] = share_purchased[0]
+cost_of_share_purchased[0] = round(share_purchased[0] * S[0] / 1000, 1)
+cumulative_cost[0] = cost_of_share_purchased[0]
+cost_of_interest[0] = round(cumulative_cost[0] * (np.exp(r * dt) - 1), 1)
+
+# Delta hedging over time
+for i in range(1, N + 1):
+    delta[i] = round(calculate_bs_delta(S[i], K, T_t[i], r, sigma), 3)
+    delta_change = delta[i] - delta[i - 1]
+    share_purchased[i] = delta_change * contract_size
+    share_in_hand[i] = share_in_hand[i-1] + share_purchased[i]
+    cost_of_share_purchased[i] = round(share_purchased[i] * S[i] / 1000, 1)
+    cumulative_cost[i] = cumulative_cost[i-1] + cost_of_share_purchased[i] + cost_of_interest[i-1]
+    cost_of_interest[i] = round(cumulative_cost[i] * (np.exp(r * dt) - 1), 1)
+
+cost_of_interest[20] = np.nan  # No interest cost at maturity
+
+# Final stock price and shares held
+final_price  = S[-1]
+final_shares = share_in_hand[-1]
+
+# Option payoff at maturity
+payoff = max(final_price - K, 0) * contract_size / 1000
+
+# Stock value at maturity
+stock_value = final_price * final_shares / 1000
+
+# Value of hedging portfolio
+hedge_portfolio_value = stock_value - cumulative_cost[-1]
+
+# Final hedging cost (rebalancing costs + replication error)
+hedging_cost = payoff - hedge_portfolio_value
+
+# Print results
+print(f"Final stock price: {final_price:.2f}")
+print(f"Option payoff ($000): {payoff:.2f}")
+print(f"Hedge portfolio value ($000): {hedge_portfolio_value:.2f}")
+print(f"Final hedging cost ($000): {hedging_cost:.2f}")
+```
+
+```{python}
+#| echo: false
+import pandas as pd
+from great_tables import GT, html
+
+# Create a DataFrame for printing results
+df = pd.DataFrame({
+    "week": np.arange(N + 1),
+    "stock_price": S,
+    "delta": delta,
+    "share_purchased": share_purchased,
+    "share_in_hand": share_in_hand,
+    "cost_of_share_purchased": cost_of_share_purchased,
+    "cumulative_cost": cumulative_cost,
+    "cost_of_interest": cost_of_interest
+})
+
+from great_tables import GT, html
+
+gt_table = (
+    GT(df)
+    .fmt_integer(columns=["share_purchased", "share_in_hand"],
+                 accounting=True)
+    .fmt_number(columns=["stock_price"], decimals=2)
+    .fmt_number(columns=["delta"], decimals=3)
+    .fmt_number(columns=["cost_of_share_purchased", "cumulative_cost", "cost_of_interest"], 
+                decimals=1,
+                accounting=True)
+    .tab_header(
+        title="Simulation of Delta Hedging",
+        subtitle="(Weekly Rebalancing for a European Call Option on 100,000 Shares)"
+    )
+    .cols_label(
+        week="Week",
+        stock_price=html("Stock <br> price"),
+        delta="Delta",
+        share_purchased=html("Shares <br> purchased"),
+        share_in_hand=html("Shares <br> in portfolio"),
+        cost_of_share_purchased=html("Cost of shares <br> purchased <br> ($000)"),
+        cumulative_cost=html("Cumulative cost <br> including interest <br> ($000)"),
+        cost_of_interest=html("Interest <br> cost <br> ($000)")
+    )
+    .cols_align(align="center")
+)
+
+gt_table.show()
+```
+
+Since the initial condition is the same as before, the hedging portfolio is established in exactly the same way. By the end of week 1, the stock price rises, leading to an increase in the option's delta. Accordingly, additional shares are purchased to rebalance the hedge.
+
+At the end of week 20, the stock price falls to $\$45.08$, and the option expires out of the money with a payoff of zero. The final hedging cost is therefore the cumulative cost of rebalancing the hedge over the 20 weeks. This amounts to $\$238.8K$.
+
+Similarly, the final hedging cost can be calculated as the negative of the replication error ($-\varepsilon_T$). In this case, the option payoff is zero. The value of the hedging portfolio is given by the value of the stock position, which is zero as no stocks are held at the end of week 20, minus the cumulative hedging cost of $\$238.8K$. The final hedging cost is therefore $0 - (\$0 - \$238.8K) = \$238.8K$.
+
+## A Vectorized Implementation
+
+To enhance computational efficiency, especially when performing delta hedging on multiple simulated stock price paths, we can implement the delta hedging strategy using vectorized operations with Python's *NumPy* library. This approach eliminates the need for explicit loops, enabling more efficient handling of large-scale simulations.
+
+Since our stock price path simulation function, `simulate_gbm_path()`, is already vectorized to support multiple paths, we begin by defining a vectorized version of the Black–Scholes delta function capable of processing arrays of stock prices and times to expiration.
+
+```{python}
+# ndtr from scipy.special is faster than norm.cdf from scipy.stats
+from scipy.special import ndtr
+
+# --- Black-Scholes delta (vectorized) ---
+def calculate_bs_delta(S, K, T, r, sigma):          # <1>
+    # Avoid division by zero inside sqrt
+    eps = 1e-12
+    t_safe = np.maximum(T, eps)
+
+    # Use t_safe in both numerator and denominator for consistency
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * t_safe) / (
+        sigma * np.sqrt(t_safe)
+    )
+
+    # Use scipy's ndtr for fast cumulative normal distribution calculation
+    delta = ndtr(d1)
+
+    # At expiration: delta = 1 if S > K else 0
+    delta = np.where(T <= 0, (S > K).astype(float), delta)
+
+    return delta
+```
+
+1. This function can handle array inputs for `S` and `T`, returning an array of delta values. In the code below when the function is called, the shape of `S` is `(num_path, N+1)`, and the shape of `T` is `(N+1,)`. Broadcasting rules in NumPy will ensure that the operations are performed correctly across these dimensions. The returned `delta` will have the shape `(num_path, N+1)`.
+
+Next, we implement the delta hedging logic in a vectorized manner. This function simulates multiple stock price paths and calculates the hedging costs for all paths at once.
+
+```{python}
+# --- Delta Hedging (Vectorized) ---
+def delta_hedge(S0, K, T, r, sigma, contract_size, N, num_path, seed=None):
+    
+    # Simulate stock price paths; shape: (num_path, N+1)
+    S = simulate_gbm_path(S0, r, sigma, T, N, num_path, seed=seed)  
+
+    # Time to expiration at each step; shape: (N+1,)
+    T_t = np.linspace(T, 0, N + 1)
+
+    # Calculate interest factors for cash account; shape : (N+1,)
+    interest_factor = np.exp(r * T_t)
+
+    # Calculate deltas and changes in deltas; shape: (num_path, N+1)
+    delta = calculate_bs_delta(S, K, T_t, r, sigma)
+    delta_change = np.diff(delta, axis=1, prepend=0)
+
+    # Cost of purchasing shares at each step; shape: (num_path, N+1)
+    cost_of_share_purchased = (delta_change * contract_size * S)
+
+    # Cumulative cost adjusted for interest; shape: (num_path,)
+    cumulative_cost = np.sum(cost_of_share_purchased * interest_factor, axis=1)
+
+    # Option payoff at maturity; shape: (num_path,)
+    payoff = np.maximum(S[:,-1] - K, 0) * contract_size
+
+    # hedge portfolio value at maturity; shape: (num_path,)
+    hedge_portfolio_value = S[:,-1] * (delta[:,-1] * contract_size) - cumulative_cost
+
+    # Final hedging cost (rebalancing costs + replication error); shape: (num_path,)
+    hedging_cost = payoff - hedge_portfolio_value
+
+    return hedging_cost
+```
+
+We run two tests to verify the correctness of our vectorized implementation. Both tests use the same parameters as before (including the same random seeds), and both will simulate two paths. Generating two paths allows us to confirm that the function handles multiple paths correctly. We compare the hedging cost of the first path in each test against the results from our earlier step-by-step implementation.
+
+```{python}
+# Parameters
+S0 = 49          # Initial stock price
+K = 50           # Strike price
+T = 20 / 52      # Time to expiration in years (20 weeks)
+r = 0.05         # Risk-free interest rate
+sigma = 0.2      # Volatility (20% per annum)
+
+contract_size = 100_000  # Number of shares per option contract
+
+# Simulation parameters
+N = 20           # Number of time steps (weekly rebalancing)
+num_path = 2     # Number of simulated paths
+
+# Run the vectorized delta hedging function
+results_seed37 = delta_hedge(S0, K, T, r, sigma, contract_size, N, num_path, seed=37)
+results_seed42 = delta_hedge(S0, K, T, r, sigma, contract_size, N, num_path, seed=42)
+
+# Print the average hedging cost
+print("Final hedging cost ($000; seed 37):",
+      np.array2string(results_seed37/1000, precision=2, separator=', '))
+print("Final hedging cost ($000; seed 42):",
+      np.array2string(results_seed42/1000, precision=2, separator=', '))
+```
+
+In the first test (seed 37), we expect the hedging cost of the first path to be approximately $\$221.10$ (in 000s), and we get $220.51$. In the second test (seed 42), we expect the hedging cost of the first path to be about $\$238.80$ (in 000s), and we get $238.62$. The results confirm that the hedging cost of the first path in each test closely matches the outcome from our step-by-step implementation, with only minor discrepancies attributable to rounding errors in the step-by-step approach. The second path in each test is newly generated so it yields different hedging costs.
+
+We are now prepared to analyze the hedging performance across various rebalancing frequencies. Following the approach in @hull2021options (Chapter 19), we consider rebalancing intervals ranging from once every five weeks to four times per week. For each frequency, we simulate $1,000,000$ stock price paths and evaluate the hedging performance by calculating the standard deviation of the hedging cost relative to the theoretical option price.
+
+```{python}
+# Black-Scholes formula to calculate the theoretical option price
+def calculate_bs_call_price(S0, K, T, r, sigma):
+    d1 = (np.log(S0 / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    call_price = S0 * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    return call_price
+
+# Parameters
+S0 = 49          # Initial stock price
+K = 50           # Strike price
+T = 20 / 52      # Time to expiration in years (20 weeks)
+r = 0.05         # Risk-free interest rate
+sigma = 0.2      # Volatility (20% per annum)
+
+contract_size = 100_000  # Number of shares per option contract
+
+option_price = calculate_bs_call_price(S0, K, T, r, sigma) * contract_size
+print(f"Theoretical option price ($000): {option_price/1000:.2f}")
+
+# Simulation parameters
+N = 20           # Number of time steps (weekly rebalancing)
+num_path = 1_000_000     # Number of simulated paths
+
+# Run delta hedging for different rebalancing frequencies
+frequencies = [5, 4, 2, 1, 0.5, 0.25]  # in weeks
+results = {}
+for freq in frequencies:
+    N_steps = int(N / freq)  # Convert frequency in weeks to number of steps
+    hedging_costs = delta_hedge(S0, K, T, r, sigma, contract_size, N_steps, num_path, seed=42)
+    results[freq] = hedging_costs
+
+# Display the result in a simple table
+print("\nHedging Performance for Different Rebalancing Frequencies:")
+print("-" * 60)
+print("Frequency | Mean Cost | Std Dev  | Hedging Performance")
+print(" (weeks)  |  ($000)   |  ($000)  | (Std Dev / Option Price)")
+print("-" * 60)
+for freq, costs in results.items():
+    cost_time_0 = costs * np.exp(-r * T)  # Adjust cost to time 0 value
+    mean_cost = np.mean(cost_time_0) / 1000  # Convert to 000s
+    std_cost = np.std(cost_time_0) / 1000  # Convert to 000s
+    hedging_performance = std_cost / (option_price / 1000)  # Ratio of std to option price
+    print(f"   {freq:.2f}   |  {mean_cost:.2f}   |  {std_cost:5.2f}   |  {hedging_performance:.2f}")
+```
+
+As expected, the average hedging cost across all simulated paths is slightly larger than the theoretical option price. Increasing the rebalancing frequency brings the average hedging cost closer to the theoretical value. Nevertheless, with discrete rebalancing, replication error will always remain.
+
+On the other hand, hedging performance improves as the rebalancing frequency increases. More frequent adjustments allow for better alignment with the option’s delta, thereby reducing overall risk.
+
+## References
+
+[Hull, J. C. (2021). *Options, Futures, and Other Derivatives* (11th ed.). Pearson.](https://www.pearson.com/en-ca/subject-catalog/p/options-futures-and-other-derivatives/P200000005938/9780136939917)
