@@ -5,3 +5,4 @@ title: "Finance with Python - A Few Examples"
 * [Simulating Stock Price Path with GBM](stock-gbm.qmd)
 * [Pricing Options with a Binomial Tree](option-bi-tree.qmd)
 * [Delta Hedging a European Call Option](delta-hedging.qmd)
+* [Mean-Variance Portfolio Optimization](mvp.qmd)

@@ -1,0 +1,503 @@
+---
+title: "Mean Variance Portfolio Optimization"
+author: "Jay / MDAL"
+bibliography: references.bib
+reference-location: margin
+citation-location: margin
+---
+
+## Intoduction
+
+Mean variance portfolio theory (MPT) is a mathematical framework for constructing a portfolio of assets optimally balancing expected return and risk. The theory was introduced by @markowitz1952portfolio in his seminal 1952 paper "Portfolio Selection," which laid the foundation for modern portfolio theory.
+
+In this tutorial, we implement the classic mean-variance portfolio optimization problem using Python. We use historical stock price data to estimate the expected returns and covariance matrix of a set of assets, and then use these estimates to construct an optimal portfolio.
+
+## Recap of Key Concepts
+
+### Formulation
+
+Let's consider a portfolio of $n$ risky assets. Let
+
+- $\mathbf{w} = (w_1, w_2, \ldots, w_n)^T$ be the vector of portfolio weights, where $w_i$ is the proportion of the total portfolio value invested in asset $i$.
+- $\mathbf{\mu} = (\mu_1, \mu_2, \ldots, \mu_n)^T$ be the vector of expected returns for each asset.
+- $\mathbf{\Sigma} = (\sigma_{ij})_{n \times n}$ be the $n \times n$ covariance matrix of asset returns.
+- $\mathbf{1}$ be a vector of ones of length $n$.
+
+The mean-variance optimization problem can be formulated as the following maximization problem:
+
+$$\begin{aligned}
+\max_{\mathbf{w}} \quad & \mathbf{w}^T \mathbf{\mu} - \frac{\gamma}{2} \mathbf{w}^T \mathbf{\Sigma} \mathbf{w} \\
+\text{s.t} \quad & \mathbf{1}^T \mathbf{w} = 1, \\
+\end{aligned}$$
+
+where $\gamma > 0$ is the risk aversion parameter.
+
+The first term in the objective function represents the expected return of the portfolio, while the second term represents the risk (variance) of the portfolio, scaled by the risk aversion parameter. The constraint ensures that the total weight of the portfolio sums to 1 [^other_formulations].
+
+[^other_formulations]: There are other equivalent formulations of the mean-variance optimization problem, such as minimizing portfolio variance subject to a lower bound on expected return or maximizing expected return subject to an upper bound on level of variance.
+
+    $$
+    \begin{aligned}
+    \min_{\mathbf{w}} \quad & \mathbf{w}^T \mathbf{\Sigma} \mathbf{w} \\
+    \text{s.t} \quad & \mathbf{w}^T \mathbf{\mu} \geq \mu_p, \mathbf{1}^T \mathbf{w} = 1\\
+    \end{aligned}
+    $$
+
+    $$
+    \begin{aligned}
+    \max_{\mathbf{w}} \quad & \mathbf{w}^T \mathbf{\mu} \\
+    \text{s.t} \quad & \mathbf{w}^T \mathbf{\Sigma} \mathbf{w} \leq \sigma_p^2, \mathbf{1}^T \mathbf{w} = 1\\
+    \end{aligned}
+    $$
+
+    See [here](https://docs.mosek.com/portfolio-cookbook/markowitz.html#) for a discussion on three equivalent formulations of the mean-variance optimization problem.
+
+This mean-variance objective function for an investor can be justified in a few ways. One common justification is that investors are assumed to be rational and risk-averse, meaning they prefer higher returns and lower risk. The mean-variance objective captures this trade-off between return and risk, allowing investors to make decisions based on their individual risk preferences.
+
+You may recall that a rational investor maximizes their expected utility. Isn't it possible to directly maximize the expected utility instead of using the mean-variance objective? Yes, it is possible. However, the mean-variance objective is often used as an approximation of the expected utility maximization problem. This is because the mean-variance objective is easier to compute and analyze than the expected utility function, especially when dealing with multiple assets.
+
+(For more on mean-variance approximation of expected utility, see @levy_markowitz1979mv_utility. There is a large literature on this topic. For example, see some recent discussions in @markowitz2014mv_approx and @schuhmacher_etal2021justifying_mv. See also the [appendix](util_approximation.qmd) for linking the mean-variance objective to expected utility maximization using a Taylor expansion.)
+
+### Solving the Optimization Problem
+
+To solve the mean-variance optimization problem, we can use various optimization techniques, such as quadratic programming (as we have a quadratic objective function and a linear constraint) or the method of Lagrange multipliers.
+
+For the current setup, we can find a closed-form solution to the mean-variance optimization problem using the method of Lagrange multipliers. The Lagrangian function for this problem is given by:
+
+$$\mathcal{L}(\mathbf{w}, \lambda) = \mathbf{w}^T \mathbf{\mu} - \frac{\gamma}{2} \mathbf{w}^T \mathbf{\Sigma} \mathbf{w} + \lambda (1 - \mathbf{1}^T \mathbf{w}),$$
+
+where $\lambda$ is the Lagrange multiplier associated with the constraint.
+
+To find the optimal portfolio weights, we take the partial derivatives of the Lagrangian with respect to $\mathbf{w}$ and $\lambda$, set them to zero, and solve the resulting system of equations.
+Setting the derivatives to zero gives us the following equations[^matrix_calculus]:
+
+[^matrix_calculus]: Recall that, from Matrix Calculus,
+
+    $$\frac{\partial}{\partial \mathbf{w}} (\mathbf{w}^T \mathbf{\mu}) = \mathbf{\mu},$$
+
+    $$\frac{\partial}{\partial \mathbf{w}} (\mathbf{w}^T \mathbf{\Sigma} \mathbf{w}) = 2\mathbf{\Sigma}\mathbf{w}$$
+    
+    (since $\mathbf{\Sigma}$ is a symmetric), and
+    
+    $$\frac{\partial}{\partial \mathbf{w}} (\lambda \mathbf{1}^T \mathbf{w}) = \lambda \mathbf{1}.$$
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{w}} = \mathbf{\mu} - \gamma \mathbf{\Sigma} \mathbf{w} - \lambda \mathbf{1} = 0$$ {#eq-l-w}
+
+$$\frac{\partial \mathcal{L}}{\partial \lambda} = 1 - \mathbf{1}^T \mathbf{w} = 0$$ {#eq-l-lambda}
+
+Assuming $\mathbf{\Sigma}$ is *positive definite*, and hence invertible, we solve for $\mathbf{w}$ using @eq-l-w:
+
+$$\mathbf{w} = \frac{1}{\gamma} \mathbf{\Sigma}^{-1} (\mathbf{\mu} - \lambda \mathbf{1})$$
+
+Plug the result into @eq-l-lambda to solve for $\lambda$.
+
+$$
+\lambda = \frac{\mathbf{1}^T \mathbf{\Sigma}^{-1} \mathbf{\mu} - \gamma}{\mathbf{1}^T \mathbf{\Sigma}^{-1} \mathbf{1}}
+$$
+
+To make the notation cleaner, let's define two scalars:
+
+* $A = \mathbf{1}^T \mathbf{\Sigma}^{-1} \mathbf{1}$
+* $B = \mathbf{1}^T \mathbf{\Sigma}^{-1} \mathbf{\mu}$
+
+Thus,
+$$
+\lambda = \frac{B - \gamma}{A}
+$$
+
+Substituting $\lambda$ back into the expression for $\mathbf{w}$, we obtain the optimal portfolio weights:
+
+$$
+\mathbf{w}^* = \frac{1}{\gamma} \mathbf{\Sigma}^{-1} \left( \mathbf{\mu} - \frac{B - \gamma}{A} \mathbf{1} \right)
+$$
+
+Or, grouping terms by $\gamma$,
+
+$$
+\mathbf{w}^* = \frac{1}{A} \mathbf{\Sigma}^{-1} \mathbf{1} + \frac{1}{\gamma} \left( \mathbf{\Sigma}^{-1} \mathbf{\mu} - \frac{B}{A} \mathbf{\Sigma}^{-1} \mathbf{1} \right)
+$$
+
+Note that the first order condition is both necessary and sufficient for optimality since the objective function is concave (the negative of a convex quadratic function) and the constraint is linear.
+
+As $\gamma \to \infty$, the investor becomes infinitely risk-averse and the optimal portfolio converges to the minimum variance portfolio:
+
+$$\mathbf{w}_{MVP} = \frac{1}{A} \mathbf{\Sigma}^{-1} \mathbf{1}.$$
+
+To trace out the efficient frontier, the set of optimal portfolios for different levels of risk aversion, we can vary $\gamma$ from a small value (close to risk-neutral) to a large value (more risk-averse) and compute the corresponding optimal portfolio weights.
+
+In the the risk-return plane (portfolio standard deviation vs expected return), the efficient frontier is the upper portion of the hyperbola formed by these optimal portfolios. That is, let $\mu_p = \mathbf{w}^{*T} \mathbf{\mu}$ be the expected return of the optimal portfolio, and $\sigma_p = \sqrt{\mathbf{w}^{*T} \mathbf{\Sigma} \mathbf{w}^*}$ be the standard deviation (risk) of the optimal portfolio. By varying $\gamma$, we can plot $\mu_p$ against $\sigma_p$ to visualize the efficient frontier.
+
+In particular, let's define another scalar $C=\mu^T \mathbf{\Sigma}^{-1} \mathbf{\mu}$. We then have:
+
+$$
+\mu_p = \frac{B}{A} + \frac{1}{\gamma} \left( C - \frac{B^2}{A} \right)
+$$
+
+$$
+\sigma_p^2 = \frac{1}{A} + \frac{1}{\gamma^2} \left( C - \frac{B^2}{A} \right)
+$$
+
+In the Python implementation below, we actually trace out the efficient frontier by varying the expected return $\mu_p$. $\mu_p$ starts from the expected return associated with the minimum variance portfolio ($\mu_p \geq\frac{B}{A}$). For any given $\mu_p$, we can solve for $\sigma_p$ as
+
+$$
+\sigma_p = \sqrt{\frac{A\mu_p^2 - 2B\mu_p + C}{AC-B^2}}.
+$$
+
+
+### Risk-free Asset Extension
+
+We can extend the mean-variance optimization problem to include a risk-free asset with return $r_f$. Let $w_f$ be the weight of the risk-free asset in the portfolio, and $\mathbf{w}$ be the weights of the risky assets. The new optimization problem becomes:
+
+$$
+\begin{aligned}
+\max_{\mathbf{w}, w_f} \quad & \mathbf{w}^T \mathbf{\mu} + w_f r_f - \frac{\gamma}{2} \mathbf{w}^T \mathbf{\Sigma} \mathbf{w} \\
+\text{s.t} \quad & \mathbf{1}^T \mathbf{w} + w_f = 1 \\
+\end{aligned}
+$$
+
+Note that the risk-free asset does not contribute to the portfolio variance.
+
+The solution to this problem can be derived similarly using the method of Lagrange multipliers, leading to adjusted optimal weights for both risky and risk-free assets.
+
+$$\mathbf{w}^* = \frac{1}{\gamma} \mathbf{\Sigma}^{-1} \underbrace{(\mathbf{\mu} - r_f \mathbf{1})}_{\text{Excess Returns}}$$ {#eq-opt-weights-risk}
+$$w_f^* = 1 - \mathbf{1}^T \mathbf{w}^*$$ {#eq-opt-weights-rf}
+
+The presence of a risk-free asset allows investors to achieve any desired combination of risk and return by adjusting the weights between the risk-free asset and the optimal risky portfolio. This leads to the concept of the *Capital Market Line (CML)*, which represents the set of optimal portfolios that can be formed by combining the risk-free asset with the market portfolio of risky assets.
+
+The CML is a straight line in the risk-return space, starting from the risk-free rate on the y-axis and tangent to the efficient frontier of risky assets. The tangency point represents the market portfolio, which is the optimal risky portfolio. The slope of the CML is given by the Sharpe ratio of the market portfolio, which measures the excess return per unit of risk.
+
+The equation of the CML can be expressed as:
+$$
+\mu_p = r_f + \frac{\mu_m - r_f}{\sigma_m} \sigma_p
+$$
+where $\mu_p$ and $\sigma_p$ are the expected return and standard deviation of the portfolio, $r_f$ is the risk-free rate, and $\mu_m$ and $\sigma_m$ are the expected return and standard deviation of the market portfolio (i.e., the tangent portfolio).
+
+The tangent portfolio can be derived by setting $w_f^*=0$ becaueuse it lies on the efficient frontier of risky assets. This implies $\mathbf{1}^T \mathbf{w}_{tangent} = 1$ (@eq-opt-weights-rf), and hence the weights of the tangent portfolio are given by @eq-opt-weights-risk with $\gamma$ eliminated through normalization.
+
+$$
+\mathbf{w}_{tangent} = \frac{\mathbf{\Sigma}^{-1}(\mathbf{\mu} - r_f \mathbf{1})}{\mathbf{1}^T \mathbf{\Sigma}^{-1} (\mathbf{\mu} - r_f \mathbf{1})}
+$$
+
+(Alternatively, the tangent portfolio can be found by maximizing the Sharpe ratio:
+$$
+\text{Sharpe Ratio} = \frac{\mathbf{w}^T (\mathbf{\mu} - r_f \mathbf{1})}{\sqrt{\mathbf{w}^T \mathbf{\Sigma} \mathbf{w}}},
+$$
+
+which yields the same result.)
+
+
+### Further Constraint on Weights
+
+In practice, investors often impose additional constraints on portfolio weights, such as prohibiting short-selling (i.e., $w_i \geq 0$ for all $i$) or setting upper bounds on individual asset allocations. These constraints can be incorporated into the optimization problem, but they also increase its complexity, making closed-form solutions unavailable in most cases. Consequently, such constrained optimization problems typically require numerical methods, as demonstrated in the Python implementation below.
+
+
+## Python Implementation (Finally!)
+
+We implement the mean-variance portfolio optimization in Python using historical stock price data. We use the `yfinance` library to fetch stock data, `numpy` and `pandas` for data manipulation, and `matplotlib` for visualization.
+
+### Case 1: Short Sell Allowed
+
+We start by downloading the data and processing it to compute monthly returns, mean returns, and the covariance matrix. We also obtain the current risk-free rate from the 10-year Treasury yield, and then de-annualize it to a monthly rate.
+
+```{python}
+import yfinance as yf
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# ------------------------------------------------------------------------------
+# 1. Data Acquisition and Processing
+# ------------------------------------------------------------------------------
+# 10 Well-known tickers and a risk-free asset
+tickers = ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'NVDA', 'JPM', 'JNJ', 'PG', 'XOM', 'TSLA']
+risk_free_ticker = "^TNX"  # 10 Year Treasury Note Yield
+
+print("Downloading data...")
+# Download past 5 years of data
+data = yf.download(tickers, start="2020-10-01", end="2025-10-31", 
+                   auto_adjust=False, progress=False)['Adj Close']
+
+# Resample to Monthly Returns
+# 'ME' is Month End
+monthly_prices = data.resample('ME').last()
+monthly_returns = monthly_prices.pct_change().dropna()
+
+# Calculate Mean Vector (mu) and Covariance Matrix (Sigma)
+mu = monthly_returns.mean()
+Sigma = monthly_returns.cov()
+
+# Get the current Risk-Free Rate
+# ^TNX is in percentage (e.g., 4.5 for 4.5%). We divide by 100 for decimal.
+# Then de-annualize to monthly: (1 + r_annual)^(1/12) - 1
+rf_data = yf.download(risk_free_ticker, start="2025-10-30", end="2025-10-31", 
+                      auto_adjust=False, progress=False)['Adj Close']
+current_rf_annual = rf_data.iloc[-1].item() / 100
+rf = (1 + current_rf_annual)**(1/12) - 1
+
+print(f"Risk-Free Rate (Monthly): {rf:.4%}")
+```
+
+We then compute the optimal portfolio weights for both the minimum variance portfolio (MVP) and the tangency portfolio (with risk-free asset). We also derive the efficient frontier and the capital market line (CML) for visualization.
+
+```{python}
+# ------------------------------------------------------------------------------
+# 2. Analytical Solutions (Matrix Algebra)
+# ------------------------------------------------------------------------------
+num_assets = len(tickers)
+ones = np.ones(num_assets)
+Sigma_inv = np.linalg.inv(Sigma)
+
+# --- Helper Constants for the Efficient Frontier ---
+# These constants define the hyperbola of the efficient frontier
+A = ones.T @ Sigma_inv @ ones
+B = ones.T @ Sigma_inv @ mu
+C = mu.T @ Sigma_inv @ mu
+Delta = A*C - B**2
+
+# --- Case 1: Risky Assets Only (Minimum Variance Portfolio) ---
+# Derived Formula: w_gmv = (Sigma_inv * 1) / A
+w_gmv = (Sigma_inv @ ones) / A
+mu_gmv = w_gmv @ mu
+sigma_gmv = np.sqrt(w_gmv @ Sigma @ w_gmv)
+
+# --- Case 2: With Risk-Free Asset (Tangency Portfolio) ---
+# Derived Formula: w_tan = Sigma_inv * (mu - rf*1) / normalized
+excess_return_vector = mu - rf * ones
+Z = Sigma_inv @ excess_return_vector
+w_tan = Z / Z.sum() # Normalize so weights sum to 1
+
+mu_tan = w_tan @ mu
+sigma_tan = np.sqrt(w_tan @ Sigma @ w_tan)
+
+# Calculate Sharpe Ratio of Tangency Portfolio
+sharpe_ratio = (mu_tan - rf) / sigma_tan
+
+# ------------------------------------------------------------------------------
+# 3. Constructing the Curves for Plotting
+# ------------------------------------------------------------------------------
+
+# A. The Efficient Frontier (Hyperbola)
+# We generate a range of target returns (y-axis) to calculate minimal risk (x-axis)
+target_mus = np.linspace(mu_gmv - 0.01, mu_tan + 0.02, 100)
+# Formula: sigma^2 = (A*mu^2 - 2*B*mu + C) / Delta
+target_sigmas = np.sqrt((A * target_mus**2 - 2 * B * target_mus + C) / Delta)
+
+# B. The Capital Market Line (CML)
+# Line equation: y = rf + Sharpe * x
+# We create a range of risks (x-axis) starting from 0
+cml_x = np.linspace(0, sigma_tan + 0.05, 100)
+cml_y = rf + sharpe_ratio * cml_x
+```
+
+We now visualize the results, plotting individual assets, the efficient frontier, the minimum variance portfolio, the tangency portfolio, and the capital market line.
+
+```{python}
+# ------------------------------------------------------------------------------
+# 4. Visualization
+# ------------------------------------------------------------------------------
+fig, ax = plt.subplots(figsize=(8, 6))
+
+# 1. Plot Individual Assets
+asset_vols = np.sqrt(np.diag(Sigma))
+ax.scatter(asset_vols, mu, c='gray', alpha=0.6, label='Individual Assets')
+for i, txt in enumerate(tickers):
+    ax.annotate(txt, (asset_vols[i], mu.iloc[i]), 
+                xytext=(5,5), textcoords='offset points', fontsize=8)
+
+# 2. Plot Efficient Frontier (Risky Assets Only)
+ax.plot(target_sigmas, target_mus, 'b-', linewidth=2, label='Efficient Frontier (Risky Only)')
+
+# 3. Plot Minimum Variance Portfolio
+ax.scatter(sigma_gmv, mu_gmv, color='r', marker='*', 
+           s=100, zorder=5, label='Global Min Variance (GMV)')
+
+# 4. Plot Tangency Portfolio
+ax.scatter(sigma_tan, mu_tan, color='gold', marker='X', 
+           s=100, edgecolors='black', zorder=5, label='Tangency Portfolio (Max Sharpe)')
+
+# 5. Plot Capital Market Line (CML)
+ax.plot(cml_x, cml_y, 'g--', linewidth=2, 
+        label=f'Capital Market Line (Sharpe: {sharpe_ratio:.2f})')
+
+# 6. Plot Risk-Free Rate
+ax.scatter(0, rf, color='green', s=80, label=f'Risk-Free Rate: {rf:.2%}/mo')
+
+# Formatting
+ax.figure.suptitle('Mean-Variance Optimization & Capital Market Line', fontsize=16)
+ax.set_xlabel('Monthly Volatility (Standard Deviation)', fontsize=12)
+ax.set_ylabel('Expected Monthly Return', fontsize=12)
+ax.legend(loc='upper left', fontsize=10, frameon=True)
+ax.grid(True, alpha=0.3)
+ax.set_xlim(0, max(asset_vols) + 0.02)
+
+fig.text(0.96, 0.12, 'Data: 5 Years Monthly Returns (Yahoo Finance)',
+         fontsize=10,
+         color='gray',
+         horizontalalignment='right',
+         verticalalignment='bottom')
+
+plt.tight_layout()
+plt.show()
+```
+
+Finally, we output the optimal weights for both the minimum variance portfolio and the tangency portfolio, along with the maximum Sharpe ratio.
+
+```{python}
+# ------------------------------------------------------------------------------
+# 5. Output Weights
+# ------------------------------------------------------------------------------
+results_df = pd.DataFrame({
+    'Asset': tickers,
+    'GMV Weights': np.round(w_gmv, 4),
+    'Tangency Weights': np.round(w_tan, 4)
+})
+print("\n--- Optimization Results ---")
+print(results_df.sort_values(by='Tangency Weights', ascending=False))
+print(f"\nMax Sharpe Ratio: {sharpe_ratio:.4f}")
+```
+
+### Case 2: No Short Selling
+
+We can modify the optimization problem to include non-negativity constraints on the portfolio weights, ensuring that no short-selling is allowed. In this case, no closed-form solution exists, but we can solve the problem using numerical optimization techniques.
+
+In this implementation, we use the `scipy.optimize.minimize` function as our solver to find the optimal weights for both the minimum variance portfolio and the tangency portfolio under the no short-selling constraint. The objective functions are defined to minimize portfolio volatility and maximize the Sharpe ratio, respectively. In addition, we generate the constrained efficient frontier by minimizing volatility for a range of target returns subject to the no short-selling constraint [^solver].
+
+[^solver]: We use the Sequential Least Squares Programming (SLSQP) algorithm provided by `scipy.optimize.minimize` to handle the equality and inequality constraints along with bounds on the weights. See the SLSQP [documentation](https://docs.scipy.org/doc/scipy/tutorial/optimize.html#sequential-least-squares-programming-slsqp-algorithm-method-slsqp) for more details.
+
+The minimization objective (portfolio volatility) used in this case is equivalent to the maximization formulation used for the case without short selling constraint.
+
+```{python}
+# ------------------------------------------------------------------------------
+# 6. No Short Selling (Numerical Solution)
+# ------------------------------------------------------------------------------
+from scipy.optimize import minimize, LinearConstraint, Bounds
+
+print("\nCalculating Constrained Optimization (No Short Selling)...")
+
+# Objective Functions for Solver (a minimizer)
+def portfolio_stats(weights, mu, Sigma):
+    w = np.array(weights)
+    ret = np.sum(w * mu)
+    vol = np.sqrt(np.dot(w.T, np.dot(Sigma, w)))
+    return ret, vol
+
+def min_volatility(weights, mu, Sigma):
+    return portfolio_stats(weights, mu, Sigma)[1]
+
+def neg_sharpe_ratio(weights, mu, Sigma, rf):
+    ret, vol = portfolio_stats(weights, mu, Sigma)
+    return -(ret - rf) / vol
+
+# Constraints & Bounds and Initial Guess
+cons_sum = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1} # Sum(w) = 1
+bounds = tuple((0, np.inf) for _ in range(num_assets))  # 0 <= w (No Short Selling)
+init_guess = num_assets * [1. / num_assets]
+
+# 1. Find Constrained GMV
+opt_gmv_c = minimize(min_volatility, init_guess, args=(mu, Sigma), 
+                     method='SLSQP', bounds=bounds, constraints=[cons_sum])
+w_gmv_c = opt_gmv_c.x
+ret_gmv_c, vol_gmv_c = portfolio_stats(w_gmv_c, mu, Sigma)
+
+# 2. Find Constrained Tangency (Max Sharpe)
+opt_tan_c = minimize(neg_sharpe_ratio, init_guess, args=(mu, Sigma, rf), 
+                     method='SLSQP', bounds=bounds, constraints=[cons_sum])
+w_tan_c = opt_tan_c.x
+ret_tan_c, vol_tan_c = portfolio_stats(w_tan_c, mu, Sigma)
+sharpe_c = (ret_tan_c - rf) / vol_tan_c
+
+# 3. Generate Constrained Efficient Frontier
+# We minimize volatility for a range of specific target returns
+target_rets_c = np.linspace(ret_gmv_c, mu.max(), 50)
+frontier_vols_c = []
+frontier_rets_c = []
+
+for tr in target_rets_c:
+    cons_ret = {'type': 'ineq', 'fun': lambda w: np.sum(w * mu) - tr} # Sum(w*mu) >= tr
+    res = minimize(min_volatility, init_guess, args=(mu, Sigma), 
+                   method='SLSQP', bounds=bounds, constraints=[cons_sum, cons_ret])
+    if res.success:
+        frontier_vols_c.append(res.fun)
+        frontier_rets_c.append(tr)
+
+# 4. Constrained CML
+cml_x_c = np.linspace(0, vol_tan_c + 0.05, 100)
+cml_y_c = rf + sharpe_c * cml_x_c
+```
+
+We visualize the constrained optimization results, plotting the constrained efficient frontier and the constrained capital market line (CML).
+
+```{python}
+# ------------------------------------------------------------------------------
+# 7. Visualization B: No Short Selling
+# ------------------------------------------------------------------------------
+fig2, ax2 = plt.subplots(figsize=(8, 6))
+
+# Plot Elements
+ax2.scatter(asset_vols, mu, c='gray', alpha=0.6, label='Individual Assets')
+for i, txt in enumerate(tickers):
+    ax2.annotate(txt, (asset_vols[i], mu.iloc[i]), xytext=(5,5), 
+                 textcoords='offset points', fontsize=8)
+
+# Plot Constrained Frontier
+ax2.plot(frontier_vols_c, frontier_rets_c, 'b-', linewidth=2, 
+         label='Efficient Frontier (No Short)')
+
+# Plot Constrained GMV
+ax2.scatter(vol_gmv_c, ret_gmv_c, color='r', marker='*', 
+            s=100, zorder=5, label='GMV (No Short)')
+
+# Plot Constrained Tangency
+ax2.scatter(vol_tan_c, ret_tan_c, color='gold', marker='X', 
+            s=100, edgecolors='black', zorder=5, label=f'Tangency (Sharpe: {sharpe_c:.2f})')
+# Plot Constrained CML
+ax2.plot(cml_x_c, cml_y_c, 'r:', linewidth=2, label='Capital Market Line (Constrained)')
+
+# Plot Risk-Free Rate
+ax2.scatter(0, rf, color='green', s=80, label=f'Risk-Free Rate: {rf:.2%}/mo')
+
+ax2.set_title('Mean-Variance Optimization (NO SHORT SELLING)', fontsize=16)
+ax2.set_xlabel('Monthly Volatility (Standard Deviation)', fontsize=12)
+ax2.set_ylabel('Expected Monthly Return', fontsize=12)
+ax2.legend(loc='upper left')
+ax2.grid(True, alpha=0.3)
+ax2.set_xlim(0, max(asset_vols) + 0.02)
+
+fig2.text(0.96, 0.12, 'Data: 5 Years Monthly Returns (Yahoo Finance)',
+         fontsize=10, color='gray', ha='right', va='bottom')
+
+plt.tight_layout()
+plt.show()
+```
+
+Finally, we compare the optimal weights for the Tangency Portfolio from both the unconstrained and constrained cases. We also report the maximum Sharpe ratios for both scenarios.
+
+```{python}
+# ------------------------------------------------------------------------------
+# 8. Compare Weights and Max Sharpe Ratios
+# ------------------------------------------------------------------------------
+comparison_df = pd.DataFrame({
+    'Asset': tickers,
+    'Short Selling OK': np.round(w_tan, 4),
+    'No Short Selling': np.round(w_tan_c, 4)
+})
+
+print("\n--- Tangency Portfolio Weight Comparison ---")
+# Filter to show only assets that have significant weight in at least one portfolio
+numeric_cols = comparison_df.select_dtypes(include=[np.number])
+mask = (numeric_cols.abs() > 0.001).any(axis=1)
+print(comparison_df[mask].sort_values(by='No Short Selling', ascending=False))
+
+print(f"\nMax Sharpe Ratio (Short Selling OK): {sharpe_ratio:.4f}")
+print(f"Max Sharpe Ratio (No Short Selling): {sharpe_c:.4f}")
+```
+
+We see that imposing the no short-selling constraint generally leads to different portfolio weights and a lower maximum Sharpe ratio, reflecting the trade-off between flexibility in asset allocation and risk-return optimization.
+
+
+
+
+
+
+
+

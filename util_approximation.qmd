@@ -1,0 +1,119 @@
+---
+title: "Appendix: Why the Mean-Variance Objective?"
+bibliography: references.bib
+reference-location: margin
+citation-location: margin
+---
+
+Why is the mean–variance (MV) objective function
+$$
+\max_w \mathbf{w}^T \mathbf{\mu} - \frac{\gamma}{2} \mathbf{w}^T \mathbf{\Sigma} \mathbf{w}
+$$
+a valid *approximation* of investor preferences?
+
+Here is one justification of the Mean-Variance optimization problem using the Taylor Series Approximation. Refer to @levy_markowitz1979mv_utility for more on this topic.
+
+### The Goal
+We start with an investor who wants to maximize the expected utility of their final wealth, $E[U(W)]$. We want to show that it can be approxmiated by the optimization problem: $\max_w \mathbf{w}^T \mathbf{\mu} - \frac{\gamma}{2} \mathbf{w}^T \mathbf{\Sigma} \mathbf{w}$.
+
+
+### Step 1: The Setup
+Let
+
+* $W$ be the random variable representing final wealth
+* $\mu_W = E[W]$ be the expected final wealth
+* $\sigma^2_W = E[(W - \mu_W)^2]$ be the variance of final wealth
+* $U(W)$ be a utility function where $U'>0$ (more wealth is good) and $U''<0$ (risk aversion)
+
+We define the *Certainty Equivalent (CE)*, the guaranteed cash amount that provides the same utility as the risky wealth $W$.
+$$U(CE) = E[U(W)]$$
+
+*Since utility increases with wealth, maximizing Expected Utility is equivalent to maximizing the Certainty Equivalent (CE).*
+
+
+### Step 2: Approximating the "Risky" Side ($E[U(W)]$)
+We approximate the utility of the random wealth $W$ using a second-order Taylor Series expansion around the expected wealth $\mu_W$.
+
+$$U(W) \approx U(\mu_W) + U'(\mu_W)(W - \mu_W) + \frac{1}{2}U''(\mu_W)(W - \mu_W)^2$$
+
+Now, we apply the expectation operator $E[\cdot]$ to the entire equation:
+
+$$E[U(W)] \approx E[U(\mu_W)] + E[U'(\mu_W)(W - \mu_W)] + E\left[\frac{1}{2}U''(\mu_W)(W - \mu_W)^2\right]$$
+
+Since $\mu_W$, $U(\mu_W)$, and its derivatives are constants, they move outside the expectation:
+
+$$E[U(W)] \approx U(\mu_W) + U'(\mu_W)\underbrace{E[W - \mu_W]}_{0} + \frac{1}{2}U''(\mu_W)\underbrace{E[(W - \mu_W)^2]}_{\sigma^2_W}$$
+
+*Note: The middle term is zero because the expected deviation from the mean is always zero.*
+
+**Result A:**
+$$E[U(W)] \approx U(\mu_W) + \frac{1}{2}U''(\mu_W)\sigma^2_W$$
+
+
+### Step 3: Approximating the "Certainty" Side ($U(CE)$)
+We also approximate the utility of the Certainty Equivalent $CE$. We expand this around $\mu_W$ as well. (This is valid assuming the risk premium is small, so $CE$ is close to $\mu_W$).
+
+$$U(CE) \approx U(\mu_W) + U'(\mu_W)(CE - \mu_W)$$
+
+*(We stop at the first order here because $CE$ is a deterministic constant, not a random variable, and we assume the difference $(CE-\mu_W)$ is small enough that the squared term is negligible.)*
+
+**Result B:**
+$$U(CE) \approx U(\mu_W) + U'(\mu_W)(CE - \mu_W)$$
+
+
+### Step 4: Equating and Solving for CE
+Recall our definition: $U(CE) = E[U(W)]$. Therefore, **Result A = Result B**.
+
+$$U(\mu_W) + U'(\mu_W)(CE - \mu_W) \approx U(\mu_W) + \frac{1}{2}U''(\mu_W)\sigma^2_W$$
+
+Subtract $U(\mu_W)$ from both sides:
+
+$$U'(\mu_W)(CE - \mu_W) \approx \frac{1}{2}U''(\mu_W)\sigma^2_W$$
+
+Divide by $U'(\mu_W)$ to isolate $CE$:
+
+$$CE - \mu_W \approx \frac{1}{2} \frac{U''(\mu_W)}{U'(\mu_W)} \sigma^2_W$$
+
+$$CE \approx \mu_W + \frac{1}{2} \frac{U''(\mu_W)}{U'(\mu_W)} \sigma^2_W$$
+
+
+### Step 5: Introducing the Risk Aversion Parameter
+We substitute the *Arrow-Pratt coefficient of absolute risk aversion*, defined as $A = -\frac{U''(\mu_W)}{U'(\mu_W)}$.
+
+$$CE \approx \mu_W - \frac{1}{2} A \sigma^2_W$$
+
+
+### Step 6: Converting Wealth to Portfolio Returns
+The equation above is in terms of *wealth*. We must convert it to *portfolio returns*.
+
+Let $W_0$ be initial wealth and $R_p$ be the random portfolio return with mean $\mu_p$ and variance $\sigma^2_p$. Final wealth is: $W = W_0(1 + R_p)$. We can compute the mean and variance of final wealth $W$:
+
+1.  *Mean:* $\mu_W = W_0(1 + \mu_p) = W_0 + W_0 \mu_p$
+2.  *Variance:* $\sigma^2_W = W_0^2 \sigma^2_p$
+
+Substitute these into the CE equation:
+
+$$CE \approx (W_0 + W_0 \mu_p) - \frac{1}{2} A (W_0^2 \sigma^2_p)$$
+
+
+### Step 7: The Final Optimization
+The investor wants to maximize $CE$.
+In an optimization problem, we can remove additive constants ($W_0$) and divide by positive constants ($W_0$) without changing the location of the maximum.
+
+1.  Maximize CE:
+    $$\max \left[ W_0 + W_0 \mu_p - \frac{1}{2} A W_0^2 \sigma^2_p \right]$$
+
+2.  Remove additive constant $W_0$:
+    $$\max \left[ W_0 \mu_p - \frac{1}{2} A W_0^2 \sigma^2_p \right]$$
+
+3.  Divide by scaling factor $W_0$:
+    $$\max \left[ \mu_p - \frac{1}{2} (A \cdot W_0) \sigma^2_p \right]$$
+
+4.  Define Relative Risk Aversion ($\gamma$):
+    We define $\gamma = A \cdot W_0$. This is the coefficient of *Relative Risk Aversion*.
+
+5.  Substitute Vector Notation: $\mu_p = \mathbf{w}^T \mathbf{\mu}$ and $\sigma^2_p = \mathbf{w}^T \mathbf{\Sigma} \mathbf{w}$
+
+We arrive at the final optimization problem:
+
+$$\max_{\mathbf{w}} \quad \mathbf{w}^T \mathbf{\mu} - \frac{\gamma}{2} \mathbf{w}^T \mathbf{\Sigma} \mathbf{w}$$
